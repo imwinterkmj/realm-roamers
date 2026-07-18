@@ -20,3 +20,7 @@ int Player::getHealth() const {
 bool Player::isDead() const {
     return health_ <= 0;
 }
+
+std::string Player::getName() const {
+    return name_;
+}
