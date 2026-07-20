@@ -1,3 +1,4 @@
+#include "game/Battle.hpp"
 #include "game/Card.hpp"
 #include "game/Enemy.hpp"
 #include "game/Player.hpp"
@@ -18,63 +19,90 @@ const char* getCardTypeName(CardType type) {
     return "未知";
 }
 
-void playCards(const std::vector<Card>& cards, Player& player, Enemy& enemy) {
-    player.startTurn();
-    std::cout << "\n[玩家回合] 能量恢复为 " << player.getEnergy() << "。\n";
-
-    for (const Card& card : cards) {
-        if (!card.play(player, enemy)) {
-            std::cout << "能量不足，无法打出 " << card.getName() << "。\n";
-            continue;
-        }
-
-        std::cout << "打出 " << card.getName()
-                  << "（" << getCardTypeName(card.getType())
-                  << "，消耗 " << card.getEnergyCost() << " 能量）。\n";
-
-        if (card.getType() == CardType::Attack) {
-            std::cout << enemy.getName() << " HP: " << enemy.getHealth() << '\n';
-            if (enemy.isDead()) {
-                std::cout << enemy.getName() << " 被击败！\n";
-                return;
-            }
-        } else {
-            std::cout << player.getName() << " 格挡: " << player.getBlock() << '\n';
-        }
+std::vector<Card> createStarterDeck() {
+    std::vector<Card> deck;
+    for (int index = 0; index < 5; ++index) {
+        deck.emplace_back("打击", CardType::Attack, 1, 6);
+        deck.emplace_back("防御", CardType::Block, 1, 5);
     }
+    return deck;
 }
 
-void enemyTurn(Player& player, const Enemy& enemy) {
-    std::cout << "\n[敌人回合] " << enemy.getName() << " 攻击，造成 "
-              << enemy.getAttackDamage() << " 点伤害。\n";
-    player.takeDamage(enemy.getAttackDamage());
-    std::cout << player.getName() << " HP: " << player.getHealth()
-              << " | 格挡: " << player.getBlock() << '\n';
+void printBattleState(const Battle& battle, const Player& player, const Enemy& enemy) {
+    std::cout << "\n[玩家回合] " << player.getName()
+              << " HP: " << player.getHealth()
+              << " | 格挡: " << player.getBlock()
+              << " | 能量: " << player.getEnergy() << '\n';
+    std::cout << enemy.getName() << " HP: " << enemy.getHealth() << '\n';
+    std::cout << "抽牌堆: " << battle.getDrawPileSize()
+              << " | 弃牌堆: " << battle.getDiscardPileSize() << "\n手牌：\n";
+
+    const std::vector<Card>& hand = battle.getHand();
+    for (std::size_t index = 0; index < hand.size(); ++index) {
+        const Card& card = hand[index];
+        std::cout << index + 1 << ". " << card.getName()
+                  << "（" << getCardTypeName(card.getType())
+                  << "，能量 " << card.getEnergyCost()
+                  << "，数值 " << card.getValue() << "）\n";
+    }
 }
 
 } // namespace
 
 int main() {
     Player player{"勇者", 80};
-    Enemy slime{"史莱姆", 20, 8};
+    Enemy slime{"史莱姆", 36, 7};
+    Battle battle{player, slime, createStarterDeck(), 42};
 
-    const std::vector<Card> firstTurnCards{
-        {"打击", CardType::Attack, 1, 6},
-        {"打击", CardType::Attack, 1, 6},
-        {"防御", CardType::Block, 1, 5}
-    };
-    const std::vector<Card> secondTurnCards{
-        {"打击", CardType::Attack, 1, 6},
-        {"打击", CardType::Attack, 1, 6}
-    };
+    std::cout << "=== C++ Card Roguelike：命令行战斗 ===\n";
 
-    playCards(firstTurnCards, player, slime);
-    if (!player.isDead() && !slime.isDead()) {
-        enemyTurn(player, slime);
+    while (!battle.isOver()) {
+        battle.startPlayerTurn();
+        bool playerEndedTurn = false;
+
+        while (!battle.isOver() && !playerEndedTurn) {
+            printBattleState(battle, player, slime);
+            std::cout << "输入手牌编号出牌，输入 0 结束回合： ";
+
+            int choice = 0;
+            if (!(std::cin >> choice)) {
+                std::cout << "\n输入结束，战斗已退出。\n";
+                return 0;
+            }
+
+            if (choice == 0) {
+                playerEndedTurn = true;
+                continue;
+            }
+
+            const std::vector<Card>& hand = battle.getHand();
+            if (choice < 1 || static_cast<std::size_t>(choice) > hand.size()) {
+                std::cout << "无效的手牌编号。\n";
+                continue;
+            }
+
+            const Card playedCard = hand[static_cast<std::size_t>(choice - 1)];
+            if (!battle.playCard(static_cast<std::size_t>(choice - 1))) {
+                std::cout << "能量不足，无法打出 " << playedCard.getName() << "。\n";
+                continue;
+            }
+
+            std::cout << "打出 " << playedCard.getName() << "。\n";
+        }
+
+        if (!battle.isOver()) {
+            std::cout << "\n[敌人回合] " << slime.getName() << " 攻击，造成 "
+                      << slime.getAttackDamage() << " 点伤害。\n";
+            battle.endPlayerTurn();
+            std::cout << player.getName() << " HP: " << player.getHealth()
+                      << " | 格挡: " << player.getBlock() << '\n';
+        }
     }
 
-    if (!player.isDead() && !slime.isDead()) {
-        playCards(secondTurnCards, player, slime);
+    if (player.isDead()) {
+        std::cout << "\n勇者被击败了。\n";
+    } else {
+        std::cout << "\n史莱姆被击败，战斗胜利！\n";
     }
 
     return 0;
