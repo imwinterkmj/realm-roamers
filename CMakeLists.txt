@@ -8,6 +8,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 add_executable(card_roguelike
     src/main.cpp
+    src/game/Card.cpp
     src/game/Player.cpp
     src/game/Enemy.cpp
 )
