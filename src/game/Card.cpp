@@ -1,4 +1,6 @@
 #include "game/Card.hpp"
+#include "game/Enemy.hpp"
+#include "game/Player.hpp"
 
 #include <utility>
 
@@ -23,4 +25,21 @@ int Card::getEnergyCost() const {
 
 int Card::getValue() const {
     return value_;
+}
+
+bool Card::play(Player& player, Enemy& enemy) const {
+    if (!player.spendEnergy(energyCost_)) {
+        return false;
+    }
+
+    switch (type_) {
+    case CardType::Attack:
+        enemy.takeDamage(value_);
+        return true;
+    case CardType::Block:
+        player.gainBlock(value_);
+        return true;
+    }
+
+    return false;
 }

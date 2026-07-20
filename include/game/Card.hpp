@@ -2,6 +2,9 @@
 
 #include <string>
 
+class Enemy;
+class Player;
+
 enum class CardType {
     Attack,
     Block
@@ -15,6 +18,7 @@ public:
     CardType getType() const;
     int getEnergyCost() const;
     int getValue() const;
+    bool play(Player& player, Enemy& enemy) const;
 
 private:
     std::string name_;

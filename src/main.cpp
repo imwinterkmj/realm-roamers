@@ -1,13 +1,13 @@
 #include "game/Card.hpp"
-#include "game/Player.hpp"
 #include "game/Enemy.hpp"
+#include "game/Player.hpp"
 
 #include <iostream>
 #include <vector>
 
 namespace {
 
-std::string getCardTypeName(CardType type) {
+const char* getCardTypeName(CardType type) {
     switch (type) {
     case CardType::Attack:
         return "攻击";
@@ -18,56 +18,63 @@ std::string getCardTypeName(CardType type) {
     return "未知";
 }
 
-void printDeck(const std::vector<Card>& deck) {
-    std::cout << "卡组：\n";
-    for (const Card& card : deck) {
-        std::cout << "- " << card.getName()
-                  << " | " << getCardTypeName(card.getType())
-                  << " | 能量: " << card.getEnergyCost()
-                  << " | 数值: " << card.getValue() << '\n';
+void playCards(const std::vector<Card>& cards, Player& player, Enemy& enemy) {
+    player.startTurn();
+    std::cout << "\n[玩家回合] 能量恢复为 " << player.getEnergy() << "。\n";
+
+    for (const Card& card : cards) {
+        if (!card.play(player, enemy)) {
+            std::cout << "能量不足，无法打出 " << card.getName() << "。\n";
+            continue;
+        }
+
+        std::cout << "打出 " << card.getName()
+                  << "（" << getCardTypeName(card.getType())
+                  << "，消耗 " << card.getEnergyCost() << " 能量）。\n";
+
+        if (card.getType() == CardType::Attack) {
+            std::cout << enemy.getName() << " HP: " << enemy.getHealth() << '\n';
+            if (enemy.isDead()) {
+                std::cout << enemy.getName() << " 被击败！\n";
+                return;
+            }
+        } else {
+            std::cout << player.getName() << " 格挡: " << player.getBlock() << '\n';
+        }
     }
-    std::cout << '\n';
+}
+
+void enemyTurn(Player& player, const Enemy& enemy) {
+    std::cout << "\n[敌人回合] " << enemy.getName() << " 攻击，造成 "
+              << enemy.getAttackDamage() << " 点伤害。\n";
+    player.takeDamage(enemy.getAttackDamage());
+    std::cout << player.getName() << " HP: " << player.getHealth()
+              << " | 格挡: " << player.getBlock() << '\n';
 }
 
 } // namespace
 
 int main() {
-    const std::vector<Card> deck{
+    Player player{"勇者", 80};
+    Enemy slime{"史莱姆", 20, 8};
+
+    const std::vector<Card> firstTurnCards{
+        {"打击", CardType::Attack, 1, 6},
         {"打击", CardType::Attack, 1, 6},
         {"防御", CardType::Block, 1, 5}
     };
-    printDeck(deck);
+    const std::vector<Card> secondTurnCards{
+        {"打击", CardType::Attack, 1, 6},
+        {"打击", CardType::Attack, 1, 6}
+    };
 
-    Player player{"勇者", 80};
-    Enemy slime{"史莱姆", 40, 8};
-    const int playerDamage = 20;
-
-    // 第一回合
-    std::cout << player.getName() << " 攻击 " << slime.getName()
-              << "，造成 " << playerDamage << " 点伤害。\n";
-    slime.takeDamage(playerDamage);
-    std::cout << slime.getName() << " HP: " << slime.getHealth() << '\n';
-
-    if (!slime.isDead()) {
-        std::cout << slime.getName() << " 反击，造成 "
-                  << slime.getAttackDamage() << " 点伤害。\n";
-        player.takeDamage(slime.getAttackDamage());
-        std::cout << player.getName() << " HP: " << player.getHealth() << "\n\n";
+    playCards(firstTurnCards, player, slime);
+    if (!player.isDead() && !slime.isDead()) {
+        enemyTurn(player, slime);
     }
 
-    // 第二回合
-    std::cout << player.getName() << " 攻击 " << slime.getName()
-              << "，造成 " << playerDamage << " 点伤害。\n";
-    slime.takeDamage(playerDamage);
-
-    if (slime.isDead()) {
-        std::cout << slime.getName() << " 被击败！\n";
-    } else {
-        std::cout << slime.getName() << " HP: " << slime.getHealth() << '\n';
-        std::cout << slime.getName() << " 反击，造成 "
-                  << slime.getAttackDamage() << " 点伤害。\n";
-        player.takeDamage(slime.getAttackDamage());
-        std::cout << player.getName() << " HP: " << player.getHealth() << '\n';
+    if (!player.isDead() && !slime.isDead()) {
+        playCards(secondTurnCards, player, slime);
     }
 
     return 0;
