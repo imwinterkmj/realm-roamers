@@ -4,6 +4,8 @@
 #include "game/GameSession.hpp"
 
 #include <iostream>
+#include <sstream>
+#include <string>
 #include <vector>
 
 namespace {
@@ -27,9 +29,29 @@ std::vector<Card> createStarterDeck() {
     return deck;
 }
 
+int readMenuChoice(const char* prompt) {
+    while (true) {
+        std::cout << prompt;
+
+        std::string input;
+        if (!std::getline(std::cin, input)) {
+            return -1;
+        }
+
+        std::istringstream parser(input);
+        int choice = 0;
+        char extraCharacter = '\0';
+        if ((parser >> choice) && !(parser >> extraCharacter)) {
+            return choice;
+        }
+
+        std::cout << "请输入一个整数。\n";
+    }
+}
+
 void printBattleState(const Battle& battle, const Player& player, const Enemy& enemy,
-                      std::size_t permanentDeckSize) {
-    std::cout << "\n[玩家回合] " << player.getName()
+                      std::size_t permanentDeckSize, int turnNumber) {
+    std::cout << "\n=== 第 " << turnNumber << " 回合 ===\n[玩家回合] " << player.getName()
               << " HP: " << player.getHealth()
               << " | 格挡: " << player.getBlock()
               << " | 能量: " << player.getEnergy() << '\n';
@@ -48,20 +70,48 @@ void printBattleState(const Battle& battle, const Player& player, const Enemy& e
     }
 }
 
+void printCardPile(const char* pileName, const std::vector<Card>& cards, bool topIsLast) {
+    std::cout << "\n=== " << pileName << "（" << cards.size() << " 张）===\n";
+    if (cards.empty()) {
+        std::cout << "（空）\n";
+        return;
+    }
+
+    if (topIsLast) {
+        for (auto iterator = cards.rbegin(); iterator != cards.rend(); ++iterator) {
+            std::cout << "- " << iterator->getName() << "\n";
+        }
+        return;
+    }
+
+    for (const Card& card : cards) {
+        std::cout << "- " << card.getName() << "\n";
+    }
+}
+
 BattleOutcome runBattle(GameSession& session, Enemy enemy, std::uint32_t seed) {
     Battle battle{session.getPlayer(), enemy, session.getDeck(), seed};
     std::cout << "\n=== 遭遇：" << enemy.getName() << " ===\n";
+    int turnNumber = 1;
 
     while (!battle.isOver()) {
         battle.startPlayerTurn();
         bool playerEndedTurn = false;
 
         while (!battle.isOver() && !playerEndedTurn) {
-            printBattleState(battle, session.getPlayer(), enemy, session.getDeckSize());
-            std::cout << "输入手牌编号出牌，输入 0 结束回合： ";
-
-            int choice = 0;
-            if (!(std::cin >> choice)) return BattleOutcome::InputClosed;
+            printBattleState(battle, session.getPlayer(), enemy, session.getDeckSize(), turnNumber);
+            const int choice = readMenuChoice(
+                "输入手牌编号出牌，0 结束回合，-2 查看抽牌堆，-3 查看弃牌堆： "
+            );
+            if (choice == -1) return BattleOutcome::InputClosed;
+            if (choice == -2) {
+                printCardPile("抽牌堆（最上方优先显示）", battle.getDrawPile(), true);
+                continue;
+            }
+            if (choice == -3) {
+                printCardPile("弃牌堆", battle.getDiscardPile(), false);
+                continue;
+            }
             if (choice == 0) {
                 playerEndedTurn = true;
                 continue;
@@ -85,6 +135,7 @@ BattleOutcome runBattle(GameSession& session, Enemy enemy, std::uint32_t seed) {
             std::cout << "\n[敌人回合] " << enemy.getName() << " 攻击，造成 "
                       << enemy.getAttackDamage() << " 点伤害。\n";
             battle.endPlayerTurn();
+            ++turnNumber;
         }
     }
 
@@ -109,9 +160,8 @@ bool chooseReward(GameSession& session) {
     }
 
     while (true) {
-        std::cout << "输入奖励编号： ";
-        int choice = 0;
-        if (!(std::cin >> choice)) return false;
+        const int choice = readMenuChoice("输入奖励编号： ");
+        if (choice == -1) return false;
         if (choice < 1 || static_cast<std::size_t>(choice) > rewards.size()) {
             std::cout << "无效的奖励编号。\n";
             continue;

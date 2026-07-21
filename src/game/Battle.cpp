@@ -6,14 +6,13 @@
 #include <algorithm>
 #include <iterator>
 #include <utility>
-#include <vector>
 
 Battle::Battle(Player& player, Enemy& enemy, std::vector<Card> deck, std::uint32_t seed)
     : player_(player),
       enemy_(enemy),
       drawPile_(std::move(deck)),
       randomEngine_(seed) {
-    std::shuffle(drawPile_.begin(), drawPile_.end(), randomEngine_);    //洗牌
+    std::shuffle(drawPile_.begin(), drawPile_.end(), randomEngine_);
 }
 
 void Battle::startPlayerTurn() {
@@ -22,11 +21,16 @@ void Battle::startPlayerTurn() {
 }
 
 bool Battle::playCard(std::size_t handIndex) {
-    if(handIndex >= hand_.size()) return false;
-    if(!hand_[handIndex].play(player_, enemy_)) return false;
+    if (handIndex >= hand_.size()) {
+        return false;
+    }
+    if (!hand_[handIndex].play(player_, enemy_)) {
+        return false;
+    }
+
     discardPile_.push_back(std::move(hand_[handIndex]));
     hand_.erase(hand_.begin() + handIndex);
-    return true;   
+    return true;
 }
 
 void Battle::endPlayerTurn() {
@@ -45,6 +49,14 @@ const std::vector<Card>& Battle::getHand() const {
     return hand_;
 }
 
+const std::vector<Card>& Battle::getDrawPile() const {
+    return drawPile_;
+}
+
+const std::vector<Card>& Battle::getDiscardPile() const {
+    return discardPile_;
+}
+
 std::size_t Battle::getDrawPileSize() const {
     return drawPile_.size();
 }
@@ -54,17 +66,20 @@ std::size_t Battle::getDiscardPileSize() const {
 }
 
 void Battle::drawCards(std::size_t count) {
-    while(count--){
-        if(drawPile_.size() == 0) {
+    while (count-- > 0) {
+        if (drawPile_.empty()) {
             shuffleDiscardIntoDrawPile();
-            if(drawPile_.size() == 0) return;
+            if (drawPile_.empty()) {
+                return;
+            }
         }
-        hand_.push_back(std::move(drawPile_[drawPile_.size() - 1]));
+
+        hand_.push_back(std::move(drawPile_.back()));
         drawPile_.pop_back();
     }
 }
 
-void Battle::shuffleDiscardIntoDrawPile() {    // 弃牌堆回到抽牌堆
+void Battle::shuffleDiscardIntoDrawPile() {
     drawPile_.insert(
         drawPile_.end(),
         std::make_move_iterator(discardPile_.begin()),
@@ -74,7 +89,7 @@ void Battle::shuffleDiscardIntoDrawPile() {    // 弃牌堆回到抽牌堆
     std::shuffle(drawPile_.begin(), drawPile_.end(), randomEngine_);
 }
 
-void Battle::discardHand() {    
+void Battle::discardHand() {
     discardPile_.insert(
         discardPile_.end(),
         std::make_move_iterator(hand_.begin()),

@@ -18,6 +18,7 @@ public:
     CardType getType() const;
     int getEnergyCost() const;
     int getValue() const;
+    // 消耗玩家能量后结算卡牌效果；能量不足时不改变战斗状态。
     bool play(Player& player, Enemy& enemy) const;
 
 private:
