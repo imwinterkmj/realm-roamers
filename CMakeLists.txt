@@ -10,6 +10,7 @@ add_executable(card_roguelike
     src/main.cpp
     src/game/Battle.cpp
     src/game/Card.cpp
+    src/game/GameSession.cpp
     src/game/Player.cpp
     src/game/Enemy.cpp
 )

@@ -1,21 +1,20 @@
 #include "game/Battle.hpp"
 #include "game/Card.hpp"
 #include "game/Enemy.hpp"
-#include "game/Player.hpp"
+#include "game/GameSession.hpp"
 
 #include <iostream>
 #include <vector>
 
 namespace {
 
+enum class BattleOutcome { Victory, Defeat, InputClosed };
+
 const char* getCardTypeName(CardType type) {
     switch (type) {
-    case CardType::Attack:
-        return "攻击";
-    case CardType::Block:
-        return "防御";
+    case CardType::Attack: return "攻击";
+    case CardType::Block: return "防御";
     }
-
     return "未知";
 }
 
@@ -28,13 +27,15 @@ std::vector<Card> createStarterDeck() {
     return deck;
 }
 
-void printBattleState(const Battle& battle, const Player& player, const Enemy& enemy) {
+void printBattleState(const Battle& battle, const Player& player, const Enemy& enemy,
+                      std::size_t permanentDeckSize) {
     std::cout << "\n[玩家回合] " << player.getName()
               << " HP: " << player.getHealth()
               << " | 格挡: " << player.getBlock()
               << " | 能量: " << player.getEnergy() << '\n';
-    std::cout << enemy.getName() << " HP: " << enemy.getHealth() << '\n';
-    std::cout << "抽牌堆: " << battle.getDrawPileSize()
+    std::cout << enemy.getName() << " HP: " << enemy.getHealth()
+              << " | 永久卡组: " << permanentDeckSize
+              << " | 抽牌堆: " << battle.getDrawPileSize()
               << " | 弃牌堆: " << battle.getDiscardPileSize() << "\n手牌：\n";
 
     const std::vector<Card>& hand = battle.getHand();
@@ -47,29 +48,20 @@ void printBattleState(const Battle& battle, const Player& player, const Enemy& e
     }
 }
 
-} // namespace
-
-int main() {
-    Player player{"勇者", 80};
-    Enemy slime{"史莱姆", 36, 7};
-    Battle battle{player, slime, createStarterDeck(), 42};
-
-    std::cout << "=== C++ Card Roguelike：命令行战斗 ===\n";
+BattleOutcome runBattle(GameSession& session, Enemy enemy, std::uint32_t seed) {
+    Battle battle{session.getPlayer(), enemy, session.getDeck(), seed};
+    std::cout << "\n=== 遭遇：" << enemy.getName() << " ===\n";
 
     while (!battle.isOver()) {
         battle.startPlayerTurn();
         bool playerEndedTurn = false;
 
         while (!battle.isOver() && !playerEndedTurn) {
-            printBattleState(battle, player, slime);
+            printBattleState(battle, session.getPlayer(), enemy, session.getDeckSize());
             std::cout << "输入手牌编号出牌，输入 0 结束回合： ";
 
             int choice = 0;
-            if (!(std::cin >> choice)) {
-                std::cout << "\n输入结束，战斗已退出。\n";
-                return 0;
-            }
-
+            if (!(std::cin >> choice)) return BattleOutcome::InputClosed;
             if (choice == 0) {
                 playerEndedTurn = true;
                 continue;
@@ -86,24 +78,63 @@ int main() {
                 std::cout << "能量不足，无法打出 " << playedCard.getName() << "。\n";
                 continue;
             }
-
             std::cout << "打出 " << playedCard.getName() << "。\n";
         }
 
         if (!battle.isOver()) {
-            std::cout << "\n[敌人回合] " << slime.getName() << " 攻击，造成 "
-                      << slime.getAttackDamage() << " 点伤害。\n";
+            std::cout << "\n[敌人回合] " << enemy.getName() << " 攻击，造成 "
+                      << enemy.getAttackDamage() << " 点伤害。\n";
             battle.endPlayerTurn();
-            std::cout << player.getName() << " HP: " << player.getHealth()
-                      << " | 格挡: " << player.getBlock() << '\n';
         }
     }
 
-    if (player.isDead()) {
-        std::cout << "\n勇者被击败了。\n";
-    } else {
-        std::cout << "\n史莱姆被击败，战斗胜利！\n";
+    if (session.getPlayer().isDead()) {
+        std::cout << "\n" << session.getPlayer().getName() << " 被击败了。\n";
+        return BattleOutcome::Defeat;
     }
 
+    std::cout << "\n" << enemy.getName() << " 被击败，战斗胜利！\n";
+    return BattleOutcome::Victory;
+}
+
+bool chooseReward(GameSession& session) {
+    const std::vector<Card> rewards = session.createRewardOptions();
+    std::cout << "\n=== 战斗奖励：选择 1 张卡加入永久卡组 ===\n";
+    for (std::size_t index = 0; index < rewards.size(); ++index) {
+        const Card& card = rewards[index];
+        std::cout << index + 1 << ". " << card.getName()
+                  << "（" << getCardTypeName(card.getType())
+                  << "，能量 " << card.getEnergyCost()
+                  << "，数值 " << card.getValue() << "）\n";
+    }
+
+    while (true) {
+        std::cout << "输入奖励编号： ";
+        int choice = 0;
+        if (!(std::cin >> choice)) return false;
+        if (choice < 1 || static_cast<std::size_t>(choice) > rewards.size()) {
+            std::cout << "无效的奖励编号。\n";
+            continue;
+        }
+
+        const Card chosenCard = rewards[static_cast<std::size_t>(choice - 1)];
+        session.addCard(chosenCard);
+        std::cout << "获得 " << chosenCard.getName()
+                  << "！永久卡组现在有 " << session.getDeckSize() << " 张卡。\n";
+        return true;
+    }
+}
+
+} // namespace
+
+int main() {
+    GameSession session{"勇者", 80, createStarterDeck(), 1337};
+    std::cout << "=== C++ Card Roguelike：两场战斗演示 ===\n";
+
+    const BattleOutcome firstBattle = runBattle(session, Enemy{"雾壳虫", 30, 6}, 42);
+    if (firstBattle != BattleOutcome::Victory || !chooseReward(session)) return 0;
+
+    std::cout << "\n带着 " << session.getDeckSize() << " 张卡进入下一场战斗。\n";
+    runBattle(session, Enemy{"锈甲卫", 42, 8}, 2026);
     return 0;
 }
