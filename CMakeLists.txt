@@ -17,6 +17,19 @@ add_executable(card_roguelike
 
 target_include_directories(card_roguelike PRIVATE include)
 
+# MSYS2's MinGW toolchains install raylib below the same prefix as the compiler.
+# This keeps the project configuration-free when CMake is invoked with that
+# toolchain, while still allowing another installation to be supplied through
+# CMAKE_PREFIX_PATH or raylib_DIR.
+if(MINGW AND NOT DEFINED raylib_DIR)
+    get_filename_component(MINGW_BIN_DIR "${CMAKE_CXX_COMPILER}" DIRECTORY)
+    get_filename_component(MINGW_PREFIX "${MINGW_BIN_DIR}" DIRECTORY)
+    list(PREPEND CMAKE_PREFIX_PATH "${MINGW_PREFIX}")
+endif()
+
+find_package(raylib CONFIG REQUIRED)
+target_link_libraries(card_roguelike PRIVATE raylib)
+
 if(MSVC)
     target_compile_options(card_roguelike PRIVATE /W4 /permissive-)
 else()

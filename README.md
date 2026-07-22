@@ -41,11 +41,12 @@ docs/          # 设计文档、角色台账与许可证说明
 ```powershell
 cmake -S . -B build -G "MinGW Makefiles"
 cmake --build build
-chcp 65001
 .\build\card_roguelike.exe
 ```
 
-`chcp 65001` 用于让 Windows 终端正确显示 UTF-8 中文。
+在 MSYS2 MinGW64 环境中运行上述命令，或确保 `D:\msys64\mingw64\bin` 已加入 `PATH`，以便程序能加载 Raylib 的动态库。
+
+当前 Week 2 Day 1 会打开一个 960 × 540 的窗口，标题为 `Realm Roamers`，并显示 `Raylib is running`。按窗口关闭按钮或 Esc 即可退出。
 
 ## 下一步
 
