@@ -1,19 +1,24 @@
-#include <raylib.h>
+#include "game/Battle.hpp"
+#include "game/Card.hpp"
+#include "game/Enemy.hpp"
+#include "game/Player.hpp"
+#include "ui/GameApp.hpp"
+
+#include <vector>
 
 int main() {
-    constexpr int windowWidth = 960;
-    constexpr int windowHeight = 540;
-
-    InitWindow(windowWidth, windowHeight, "Realm Roamers");
-    SetTargetFPS(60);
-
-    while (!WindowShouldClose()) {
-        BeginDrawing();
-        ClearBackground(RAYWHITE);
-        DrawText("Raylib is running", 48, 48, 32, DARKGRAY);
-        EndDrawing();
+    std::vector<Card> starterDeck;
+    for (int index = 0; index < 5; ++index) {
+        starterDeck.emplace_back("Strike", CardType::Attack, 1, 6);
+        starterDeck.emplace_back("Defend", CardType::Block, 1, 5);
     }
 
-    CloseWindow();
+    Player player{"勇者", 80};
+    Enemy enemy{"训练木桩", 30, 6};
+    Battle battle{player, enemy, starterDeck, 42};
+    battle.startPlayerTurn();
+
+    GameApp app{player, enemy, battle};
+    app.run();
     return 0;
 }
