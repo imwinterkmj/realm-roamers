@@ -24,7 +24,7 @@ void GameApp::run() {
     // 否则 Raylib 会用错误的占位字形显示它。
     constexpr const char* uiCharacters =
         "域上行者第回合玩家敌人生 命格挡能量意图攻击卡堆抽牌弃牌手牌训练木桩勇者打击防御费用伤害造成点获得"
-        "结束提示点击以使用交互将在下一阶段开放不足0123456789";
+        "结束提示点击以使用交互将在下一阶段开放不足请选择或无法已出敌人行动战斗胜利失败，0123456789";
 
     // 必须先创建窗口，再加载字体；字体加载需要图形上下文来生成字形纹理。
     InitWindow(windowWidth, windowHeight, "域上行者");
@@ -37,6 +37,8 @@ void GameApp::run() {
     UnloadCodepoints(glyphs);
 
     while (!WindowShouldClose()) {
+        // 先响应本帧输入，再绘制，因此出牌或结束回合后的状态会立刻反映到画面。
+        handleInput();
         BeginDrawing();
         // 全局深色背景；具体面板和卡牌会在 drawBattleState() 中叠加绘制。
         ClearBackground(Color{20, 24, 33, 255});
@@ -47,6 +49,116 @@ void GameApp::run() {
     // 与 LoadFontEx 对应，关闭窗口前释放字体纹理资源。
     UnloadFont(uiFont);
     CloseWindow();
+}
+
+void GameApp::handleInput() {
+    // 反馈显示约 2 秒；每帧递减，归零后不再绘制。
+    feedbackTimer_ = std::max(0.0F, feedbackTimer_ - GetFrameTime());
+
+    // Pressed 只在“按下的第一帧”返回 true，避免按住鼠标时连续触发多次出牌。
+    if (!IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+        return;
+    }
+
+    // 战斗结束后不再允许改变 Battle，仅重复显示最终结果。
+    if (battle_.isOver()) {
+        setFeedback(player_.isDead() ? "战斗失败" : "战斗胜利",
+                    player_.isDead() ? Color{248, 113, 113, 255} : Color{74, 222, 128, 255});
+        return;
+    }
+
+    // Raylib 返回的是窗口坐标；它与绘制、Rectangle 使用相同的坐标系。
+    const Vector2 mousePosition = GetMousePosition();
+
+    // 结束回合：Battle 会弃掉手牌、结算敌人攻击；若双方存活则立即开启下一玩家回合。
+    if (CheckCollisionPointRec(mousePosition, getEndTurnButtonBounds())) {
+        battle_.endPlayerTurn();
+        if (battle_.isOver()) {
+            setFeedback(player_.isDead() ? "战斗失败" : "战斗胜利",
+                        player_.isDead() ? Color{248, 113, 113, 255} : Color{74, 222, 128, 255});
+            return;
+        }
+
+        ++turnNumber_;
+        battle_.startPlayerTurn();
+        setFeedback("敌人行动结束", Color{148, 163, 184, 255});
+        return;
+    }
+
+    // cardBounds 的第 i 个矩形和 hand 的第 i 张卡严格对应。
+    // 这样命中测试得到的 index 可以直接传给 Battle::playCard(index)。
+    const std::vector<Rectangle> cardBounds = getHandCardBounds();
+    const std::vector<Card>& hand = battle_.getHand();
+    for (std::size_t index = 0; index < cardBounds.size(); ++index) {
+        if (!CheckCollisionPointRec(mousePosition, cardBounds[index])) {
+            continue;
+        }
+
+        // playCard() 成功后会从手牌 vector 删除该元素，因此先复制名称用于后续反馈。
+        const Card selectedCard = hand[index];
+        if (!battle_.playCard(index)) {
+            setFeedback("能量不足，无法使用", Color{250, 204, 21, 255});
+            return;
+        }
+
+        if (battle_.isOver()) {
+            setFeedback("战斗胜利", Color{74, 222, 128, 255});
+            return;
+        }
+
+        setFeedback(TextFormat("已使用 %s", selectedCard.getName().c_str()), Color{56, 189, 248, 255});
+        return;
+    }
+
+    // 点击没有命中任何可交互区域时，给出提示而不改变战斗状态。
+    setFeedback("请选择手牌或结束回合", Color{148, 163, 184, 255});
+}
+
+std::vector<Rectangle> GameApp::getHandCardBounds() const {
+    // 这里的尺寸必须与 drawBattleState() 绘制卡片时使用的尺寸一致。
+    // 将计算提取为函数后，绘制与点击会天然保持同步。
+    constexpr int margin = 56;
+    constexpr int cardGap = 16;
+    constexpr int maximumCardWidth = 230;
+    constexpr int cardHeight = 210;
+    constexpr int cardY = 485;
+
+    const int screenWidth = GetScreenWidth();
+    const int contentWidth = screenWidth - margin * 2;
+    const int cardCount = static_cast<int>(battle_.getHand().size());
+    // 牌数较少时使用理想宽度；牌数较多时缩小到一行仍能显示完整手牌。
+    const int cardWidth = cardCount > 0
+        ? std::min(maximumCardWidth, (contentWidth - cardGap * (cardCount - 1)) / cardCount)
+        : maximumCardWidth;
+    const int handWidth = cardCount * cardWidth + std::max(0, cardCount - 1) * cardGap;
+    int cardX = (screenWidth - handWidth) / 2;
+
+    // 按从左到右的顺序生成矩形，因此它们的索引就是 Battle 手牌索引。
+    std::vector<Rectangle> cardBounds;
+    cardBounds.reserve(static_cast<std::size_t>(cardCount));
+    for (int index = 0; index < cardCount; ++index) {
+        cardBounds.push_back(Rectangle{static_cast<float>(cardX), static_cast<float>(cardY),
+                                       static_cast<float>(cardWidth), static_cast<float>(cardHeight)});
+        cardX += cardWidth + cardGap;
+    }
+    return cardBounds;
+}
+
+Rectangle GameApp::getEndTurnButtonBounds() const {
+    // 按钮固定在牌堆行的水平中心；绘制时也调用此函数，而不是重复写坐标。
+    constexpr int endTurnButtonWidth = 240;
+    constexpr int pileY = 790;
+    constexpr int pileHeight = 70;
+    const int buttonX = (GetScreenWidth() - endTurnButtonWidth) / 2;
+    return Rectangle{static_cast<float>(buttonX), static_cast<float>(pileY),
+                     static_cast<float>(endTurnButtonWidth), static_cast<float>(pileHeight)};
+}
+
+void GameApp::setFeedback(std::string message, Color color) {
+    // std::move 将传入字符串所有权转给成员变量，避免不必要的复制。
+    feedback_ = std::move(message);
+    feedbackColor_ = color;
+    feedbackTimer_ = 2.0F;
 }
 
 void GameApp::drawBattleState(Font uiFont) const {
@@ -116,11 +228,13 @@ void GameApp::drawBattleState(Font uiFont) const {
 
     // -------- 中部：手牌区域标题 --------
     drawText("手牌", margin, 445, 24, mutedText);
+    if (feedbackTimer_ > 0.0F) {
+        drawText(feedback_.c_str(), margin + 80, 447, 22, feedbackColor_);
+    }
 
     // -------- 底部：抽牌堆、弃牌堆和结束回合按钮 --------
     // 抽牌堆固定在左、弃牌堆固定在右；结束回合按钮位于视觉中心。
     constexpr int pileWidth = 320;
-    constexpr int endTurnButtonWidth = 240;
     constexpr int pileY = 790;
     constexpr int pileHeight = 70;
     // 复用同一套“标签 + 数量”的小面板样式，避免抽牌堆与弃牌堆的绘制代码重复。
@@ -137,29 +251,26 @@ void GameApp::drawBattleState(Font uiFont) const {
     drawPile("抽牌堆", static_cast<int>(battle_.getDrawPileSize()), margin);
     drawPile("弃牌堆", static_cast<int>(battle_.getDiscardPileSize()), screenWidth - margin - pileWidth);
 
-    // Day 3 只绘制按钮外观；Day 4 才会检测点击并调用 Battle::endPlayerTurn()。
-    const int endTurnButtonX = (screenWidth - endTurnButtonWidth) / 2;
-    DrawRectangleRounded(Rectangle{static_cast<float>(endTurnButtonX), static_cast<float>(pileY),
-                                   static_cast<float>(endTurnButtonWidth), static_cast<float>(pileHeight)},
-                         0.12F, 8, buttonColor);
-    drawCenteredText("结束回合", endTurnButtonX + endTurnButtonWidth / 2, pileY + 25, 28, RAYWHITE);
+    // 点击区域与 handleInput() 共用 getEndTurnButtonBounds()，防止按钮外观和判定位置不同步。
+    const Rectangle endTurnButtonBounds = getEndTurnButtonBounds();
+    const bool battleOver = battle_.isOver();
+    DrawRectangleRounded(endTurnButtonBounds, 0.12F, 8, battleOver ? unavailableColor : buttonColor);
+    drawCenteredText(battleOver ? "战斗结束" : "结束回合",
+                     static_cast<int>(endTurnButtonBounds.x + endTurnButtonBounds.width / 2.0F),
+                     pileY + 25, 28, RAYWHITE);
 
     // -------- 中下部：手牌卡片 --------
     // getHand() 返回只读引用，UI 仅展示卡牌，不在这里移除或打出卡牌。
     const std::vector<Card>& hand = battle_.getHand();
-    constexpr int cardGap = 16;
-    constexpr int maximumCardWidth = 230;
-    constexpr int cardHeight = 210;
-    const int cardCount = static_cast<int>(hand.size());
-    // 单张卡最大 230 像素；手牌变多或窗口变窄时自动缩小，保证一排仍能放下。
-    const int cardWidth = cardCount > 0
-        ? std::min(maximumCardWidth, (contentWidth - cardGap * (cardCount - 1)) / cardCount)
-        : maximumCardWidth;
-    const int handWidth = cardCount * cardWidth + std::max(0, cardCount - 1) * cardGap;
-    int cardX = (screenWidth - handWidth) / 2;
-    constexpr int cardY = 485;
+    // getHandCardBounds() 同时供绘制和点击检测使用，保证两者始终对齐。
+    const std::vector<Rectangle> cardBounds = getHandCardBounds();
 
-    for (const Card& card : hand) {
+    for (std::size_t index = 0; index < hand.size(); ++index) {
+        const Card& card = hand[index];
+        const Rectangle cardRect = cardBounds[index];
+        const int cardX = static_cast<int>(cardRect.x);
+        const int cardY = static_cast<int>(cardRect.y);
+        const int cardWidth = static_cast<int>(cardRect.width);
         // 费用：每张牌右上角的数字表示使用它要消耗多少能量。
         // Day 4 点击卡牌时，Battle::playCard() 会再次做同样的合法性检查。
         const bool canAfford = player_.getEnergy() >= card.getEnergyCost();
@@ -173,12 +284,8 @@ void GameApp::drawBattleState(Font uiFont) const {
             : TextFormat("获得 %i 点格挡", card.getValue());
 
         // 1) 卡片底色和边框：能量不足时统一使用灰色，方便玩家识别不可用牌。
-        DrawRectangleRounded(Rectangle{static_cast<float>(cardX), static_cast<float>(cardY),
-                                       static_cast<float>(cardWidth), static_cast<float>(cardHeight)},
-                             0.08F, 8, cardColor);
-        DrawRectangleRoundedLinesEx(Rectangle{static_cast<float>(cardX), static_cast<float>(cardY),
-                                              static_cast<float>(cardWidth), static_cast<float>(cardHeight)},
-                                    0.08F, 8, 3.0F, cardBorder);
+        DrawRectangleRounded(cardRect, 0.08F, 8, cardColor);
+        DrawRectangleRoundedLinesEx(cardRect, 0.08F, 8, 3.0F, cardBorder);
         // 2) 费用角标：黄色圆圈中的数值就是 energyCost，例如 1 点能量。
         DrawCircle(cardX + cardWidth - 34, cardY + 34, 21.0F, canAfford ? energyColor : mutedText);
         drawCenteredText(TextFormat("%i", card.getEnergyCost()), cardX + cardWidth - 34, cardY + 17, 26,
@@ -188,7 +295,6 @@ void GameApp::drawBattleState(Font uiFont) const {
         drawCenteredText(card.getName().c_str(), cardX + cardWidth / 2, cardY + 65, 34, RAYWHITE);
         DrawLine(cardX + 20, cardY + 112, cardX + cardWidth - 20, cardY + 112, borderColor);
         drawCenteredText(effect.c_str(), cardX + cardWidth / 2, cardY + 137, 22, primaryText);
-        cardX += cardWidth + cardGap;
     }
 
     // 牌堆标题和分隔线放在最后绘制，保持它们位于同一区域的最上层。
