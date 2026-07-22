@@ -9,8 +9,8 @@
 int main() {
     std::vector<Card> starterDeck;
     for (int index = 0; index < 5; ++index) {
-        starterDeck.emplace_back("Strike", CardType::Attack, 1, 6);
-        starterDeck.emplace_back("Defend", CardType::Block, 1, 5);
+        starterDeck.emplace_back("打击", CardType::Attack, 1, 6);
+        starterDeck.emplace_back("防御", CardType::Block, 1, 5);
     }
 
     Player player{"勇者", 80};
