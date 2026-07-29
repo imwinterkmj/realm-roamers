@@ -27,7 +27,7 @@ void GameApp::run() {
     constexpr const char* uiCharacters =
         "域上行者第回合玩家敌人生 命格挡能量意图攻击卡堆抽牌弃牌手牌训练木桩勇者打击重击防御壁垒费用伤害造成点获得"
         "结束提示点击以使用交互将在下一阶段开放不足请选择或无法已出敌人行动战斗胜利失败，开始选择狌旋龟高低血攻"
-        "返回菜单再来一场0123456789";
+        "返回菜单再来一场游戏退出地图路线节点休息恢复继续冒险完成一段小型蓝色0123456789";
 
     // 必须先创建窗口，再加载字体；字体加载需要图形上下文来生成字形纹理。
     InitWindow(windowWidth, windowHeight, "域上行者");
@@ -39,7 +39,7 @@ void GameApp::run() {
     Font uiFont = LoadFontEx(fontPath, 48, glyphs, glyphCount);
     UnloadCodepoints(glyphs);
 
-    while (!WindowShouldClose()) {
+    while (!WindowShouldClose() && !shouldExit_) {
         // 先响应本帧输入，再绘制，因此出牌或结束回合后的状态会立刻反映到画面。
         handleInput();
         BeginDrawing();
@@ -49,8 +49,14 @@ void GameApp::run() {
         case GameState::MainMenu:
             drawMainMenu(uiFont);
             break;
+        case GameState::Map:
+            drawMap(uiFont);
+            break;
         case GameState::Battle:
             drawBattleState(uiFont);
+            break;
+        case GameState::Rest:
+            drawRestScreen(uiFont);
             break;
         case GameState::Victory:
         case GameState::Defeat:
@@ -78,6 +84,14 @@ void GameApp::handleInput() {
         handleMainMenuInput();
         return;
     }
+    if (gameState_ == GameState::Map) {
+        handleMapInput();
+        return;
+    }
+    if (gameState_ == GameState::Rest) {
+        handleRestInput();
+        return;
+    }
     if (gameState_ == GameState::Victory || gameState_ == GameState::Defeat) {
         handleResultInput();
         return;
@@ -85,7 +99,7 @@ void GameApp::handleInput() {
 
     // 战斗结束后不再允许改变 Battle，直接切换到专用结果界面。
     if (battle_->isOver()) {
-        gameState_ = player_->isDead() ? GameState::Defeat : GameState::Victory;
+        finishBattle();
         return;
     }
 
@@ -96,7 +110,7 @@ void GameApp::handleInput() {
     if (CheckCollisionPointRec(mousePosition, getEndTurnButtonBounds())) {
         battle_->endPlayerTurn();
         if (battle_->isOver()) {
-            gameState_ = player_->isDead() ? GameState::Defeat : GameState::Victory;
+            finishBattle();
             return;
         }
 
@@ -123,7 +137,7 @@ void GameApp::handleInput() {
         }
 
         if (battle_->isOver()) {
-            gameState_ = GameState::Victory;
+            finishBattle();
             return;
         }
 
@@ -137,37 +151,87 @@ void GameApp::handleInput() {
 
 void GameApp::handleMainMenuInput() {
     const Vector2 mousePosition = GetMousePosition();
-    const std::vector<Rectangle> enemyChoices = getEnemyChoiceBounds();
+    const std::vector<Rectangle> buttons = getMainMenuButtonBounds();
 
-    // 两张选项卡分别启动不同数值定位的基础敌人，后续地图节点会复用 startBattle()。
-    if (CheckCollisionPointRec(mousePosition, enemyChoices[0])) {
+    if (CheckCollisionPointRec(mousePosition, buttons[0])) {
+        startNewRun();
+    } else if (CheckCollisionPointRec(mousePosition, buttons[1])) {
+        shouldExit_ = true;
+    }
+}
+
+void GameApp::handleMapInput() {
+    const std::vector<Rectangle> mapNodes = getMapNodeBounds();
+    if (!CheckCollisionPointRec(GetMousePosition(), mapNodes[static_cast<std::size_t>(mapNodeIndex_)])) {
+        return;
+    }
+
+    // 路线固定为：狌狌战斗 → 休息点 → 旋龟战斗。
+    if (mapNodeIndex_ == 0) {
         startBattle("狌狌", 26, 8);
-    } else if (CheckCollisionPointRec(mousePosition, enemyChoices[1])) {
+    } else if (mapNodeIndex_ == 1) {
+        gameState_ = GameState::Rest;
+    } else {
         startBattle("旋龟", 48, 4);
     }
 }
 
+void GameApp::handleRestInput() {
+    // 只有点击按钮才会消耗休息节点；避免误点空白处直接推进路线。
+    if (!CheckCollisionPointRec(GetMousePosition(), getRestButtonBounds())) {
+        return;
+    }
+
+    // 休息点只有一个交互：恢复 20 点生命，然后解锁下一节点。
+    player_->heal(20);
+    ++mapNodeIndex_;
+    gameState_ = GameState::Map;
+}
+
 void GameApp::handleResultInput() {
-    // MVP 阶段的结果界面只有一个入口：点击后返回菜单并选择下一场战斗。
+    // MVP 阶段的结果界面只有一个入口：点击明确的按钮后回到菜单。
+    if (!CheckCollisionPointRec(GetMousePosition(), getResultButtonBounds())) {
+        return;
+    }
+
     gameState_ = GameState::MainMenu;
 }
 
-void GameApp::startBattle(std::string enemyName, int enemyHealth, int enemyAttack) {
-    std::vector<Card> starterDeck;
-    for (int index = 0; index < 4; ++index) starterDeck.emplace_back("打击", CardType::Attack, 1, 6);
-    for (int index = 0; index < 2; ++index) starterDeck.emplace_back("重击", CardType::Attack, 2, 12);
-    for (int index = 0; index < 3; ++index) starterDeck.emplace_back("防御", CardType::Block, 1, 5);
-    starterDeck.emplace_back("壁垒", CardType::Block, 2, 11);
+void GameApp::startNewRun() {
+    deck_.clear();
+    for (int index = 0; index < 4; ++index) deck_.emplace_back("打击", CardType::Attack, 1, 6);
+    for (int index = 0; index < 2; ++index) deck_.emplace_back("重击", CardType::Attack, 2, 12);
+    for (int index = 0; index < 3; ++index) deck_.emplace_back("防御", CardType::Block, 1, 5);
+    deck_.emplace_back("壁垒", CardType::Block, 2, 11);
 
     player_ = std::make_unique<Player>("勇者", 80);
+    enemy_.reset();
+    battle_.reset();
+    mapNodeIndex_ = 0;
+    feedback_.clear();
+    feedbackTimer_ = 0.0F;
+    gameState_ = GameState::Map;
+}
+
+void GameApp::startBattle(std::string enemyName, int enemyHealth, int enemyAttack) {
     enemy_ = std::make_unique<Enemy>(std::move(enemyName), enemyHealth, enemyAttack);
-    battle_ = std::make_unique<Battle>(*player_, *enemy_, std::move(starterDeck), 42);
+    battle_ = std::make_unique<Battle>(*player_, *enemy_, deck_, 42 + static_cast<std::uint32_t>(mapNodeIndex_));
     battle_->startPlayerTurn();
 
     turnNumber_ = 1;
     feedback_.clear();
     feedbackTimer_ = 0.0F;
     gameState_ = GameState::Battle;
+}
+
+void GameApp::finishBattle() {
+    if (player_->isDead()) {
+        gameState_ = GameState::Defeat;
+        return;
+    }
+
+    ++mapNodeIndex_;
+    gameState_ = mapNodeIndex_ >= 3 ? GameState::Victory : GameState::Map;
 }
 
 std::vector<Rectangle> GameApp::getHandCardBounds() const {
@@ -210,20 +274,43 @@ Rectangle GameApp::getEndTurnButtonBounds() const {
                      static_cast<float>(endTurnButtonWidth), static_cast<float>(pileHeight)};
 }
 
-std::vector<Rectangle> GameApp::getEnemyChoiceBounds() const {
-    constexpr int cardWidth = 400;
-    constexpr int cardHeight = 280;
-    constexpr int gap = 64;
-    const int totalWidth = cardWidth * 2 + gap;
-    const int firstX = (GetScreenWidth() - totalWidth) / 2;
-    constexpr int cardY = 315;
+std::vector<Rectangle> GameApp::getMainMenuButtonBounds() const {
+    constexpr int buttonWidth = 300;
+    constexpr int buttonHeight = 72;
+    constexpr int gap = 28;
+    const int firstX = (GetScreenWidth() - buttonWidth) / 2;
+    constexpr int firstY = 390;
 
     return {
-        Rectangle{static_cast<float>(firstX), static_cast<float>(cardY),
-                  static_cast<float>(cardWidth), static_cast<float>(cardHeight)},
-        Rectangle{static_cast<float>(firstX + cardWidth + gap), static_cast<float>(cardY),
-                  static_cast<float>(cardWidth), static_cast<float>(cardHeight)}
+        Rectangle{static_cast<float>(firstX), static_cast<float>(firstY),
+                  static_cast<float>(buttonWidth), static_cast<float>(buttonHeight)},
+        Rectangle{static_cast<float>(firstX), static_cast<float>(firstY + buttonHeight + gap),
+                  static_cast<float>(buttonWidth), static_cast<float>(buttonHeight)}
     };
+}
+
+std::vector<Rectangle> GameApp::getMapNodeBounds() const {
+    constexpr int nodeSize = 128;
+    const int centerY = 420;
+    const int screenWidth = GetScreenWidth();
+    const int firstX = screenWidth / 2 - 300;
+
+    return {
+        Rectangle{static_cast<float>(firstX), static_cast<float>(centerY),
+                  static_cast<float>(nodeSize), static_cast<float>(nodeSize)},
+        Rectangle{static_cast<float>(screenWidth / 2 - nodeSize / 2), static_cast<float>(centerY),
+                  static_cast<float>(nodeSize), static_cast<float>(nodeSize)},
+        Rectangle{static_cast<float>(screenWidth / 2 + 172), static_cast<float>(centerY),
+                  static_cast<float>(nodeSize), static_cast<float>(nodeSize)}
+    };
+}
+
+Rectangle GameApp::getRestButtonBounds() const {
+    return Rectangle{static_cast<float>(GetScreenWidth() / 2 - 150), 440.0F, 300.0F, 72.0F};
+}
+
+Rectangle GameApp::getResultButtonBounds() const {
+    return Rectangle{static_cast<float>(GetScreenWidth() / 2 - 150), 430.0F, 300.0F, 72.0F};
 }
 
 void GameApp::setFeedback(std::string message, Color color) {
@@ -236,9 +323,8 @@ void GameApp::setFeedback(std::string message, Color color) {
 void GameApp::drawMainMenu(Font uiFont) const {
     const Color primaryText{226, 232, 240, 255};
     const Color mutedText{148, 163, 184, 255};
-    const Color borderColor{71, 85, 105, 255};
-    const Color fastEnemyColor{117, 52, 68, 255};
-    const Color toughEnemyColor{43, 83, 108, 255};
+    const Color startButtonColor{59, 130, 246, 255};
+    const Color exitButtonColor{71, 85, 105, 255};
 
     const auto drawText = [uiFont](const char* text, int x, int y, int fontSize, Color color) {
         DrawTextEx(uiFont, text, Vector2{static_cast<float>(x), static_cast<float>(y)},
@@ -252,24 +338,77 @@ void GameApp::drawMainMenu(Font uiFont) const {
 
     const int screenWidth = GetScreenWidth();
     drawCenteredText("域上行者", screenWidth / 2, 100, 58, primaryText);
-    drawCenteredText("选择敌人开始战斗", screenWidth / 2, 190, 30, mutedText);
+    drawCenteredText("开始一段小型路线冒险", screenWidth / 2, 190, 30, mutedText);
 
-    const std::vector<Rectangle> enemyChoices = getEnemyChoiceBounds();
-    const auto drawEnemyChoice = [&drawCenteredText, borderColor](Rectangle bounds, Color background,
-                                                                    const char* name, const char* role,
-                                                                    int health, int attack) {
-        DrawRectangleRounded(bounds, 0.08F, 8, background);
-        DrawRectangleRoundedLinesEx(bounds, 0.08F, 8, 3.0F, borderColor);
-        const int centerX = static_cast<int>(bounds.x + bounds.width / 2.0F);
-        drawCenteredText(name, centerX, static_cast<int>(bounds.y) + 42, 44, RAYWHITE);
-        drawCenteredText(role, centerX, static_cast<int>(bounds.y) + 104, 26, RAYWHITE);
-        drawCenteredText(TextFormat("生命 %i", health), centerX, static_cast<int>(bounds.y) + 162, 28, RAYWHITE);
-        drawCenteredText(TextFormat("攻击 %i", attack), centerX, static_cast<int>(bounds.y) + 206, 28, RAYWHITE);
+    const std::vector<Rectangle> buttons = getMainMenuButtonBounds();
+    DrawRectangleRounded(buttons[0], 0.12F, 8, startButtonColor);
+    drawCenteredText("开始游戏", screenWidth / 2, static_cast<int>(buttons[0].y) + 20, 30, RAYWHITE);
+    DrawRectangleRounded(buttons[1], 0.12F, 8, exitButtonColor);
+    drawCenteredText("退出游戏", screenWidth / 2, static_cast<int>(buttons[1].y) + 20, 30, primaryText);
+}
+
+void GameApp::drawMap(Font uiFont) const {
+    const Color primaryText{226, 232, 240, 255};
+    const Color mutedText{148, 163, 184, 255};
+    const Color borderColor{71, 85, 105, 255};
+    const Color activeColor{59, 130, 246, 255};
+    const Color battleColor{117, 52, 68, 255};
+    const Color restColor{43, 83, 108, 255};
+
+    const auto drawText = [uiFont](const char* text, int x, int y, int fontSize, Color color) {
+        DrawTextEx(uiFont, text, Vector2{static_cast<float>(x), static_cast<float>(y)},
+                   static_cast<float>(fontSize), 1.0F, color);
+    };
+    const auto drawCenteredText = [&drawText, uiFont](const char* text, int centerX, int y,
+                                                       int fontSize, Color color) {
+        const float textWidth = MeasureTextEx(uiFont, text, static_cast<float>(fontSize), 1.0F).x;
+        drawText(text, centerX - static_cast<int>(textWidth / 2.0F), y, fontSize, color);
     };
 
-    drawEnemyChoice(enemyChoices[0], fastEnemyColor, "狌狌", "高攻低血", 26, 8);
-    drawEnemyChoice(enemyChoices[1], toughEnemyColor, "旋龟", "高血低攻", 48, 4);
-    drawCenteredText("点击敌人开始战斗", screenWidth / 2, 660, 24, mutedText);
+    const int screenWidth = GetScreenWidth();
+    drawCenteredText("路线地图", screenWidth / 2, 100, 52, primaryText);
+    drawCenteredText(TextFormat("生命 %i", player_->getHealth()), screenWidth / 2, 180, 28, mutedText);
+
+    const std::vector<Rectangle> nodes = getMapNodeBounds();
+    DrawLineEx(Vector2{nodes[0].x + nodes[0].width, nodes[0].y + nodes[0].height / 2.0F},
+               Vector2{nodes[1].x, nodes[1].y + nodes[1].height / 2.0F}, 4.0F, borderColor);
+    DrawLineEx(Vector2{nodes[1].x + nodes[1].width, nodes[1].y + nodes[1].height / 2.0F},
+               Vector2{nodes[2].x, nodes[2].y + nodes[2].height / 2.0F}, 4.0F, borderColor);
+
+    const auto drawNode = [&drawCenteredText, activeColor, battleColor, restColor](
+                              Rectangle bounds, const char* label, Color color, bool isActive) {
+        DrawRectangleRounded(bounds, 0.16F, 8, color);
+        DrawRectangleRoundedLinesEx(bounds, 0.16F, 8, 4.0F, isActive ? activeColor : color);
+        drawCenteredText(label, static_cast<int>(bounds.x + bounds.width / 2.0F),
+                         static_cast<int>(bounds.y + 42), 28, RAYWHITE);
+    };
+
+    drawNode(nodes[0], "狌狌", battleColor, mapNodeIndex_ == 0);
+    drawNode(nodes[1], "休息", restColor, mapNodeIndex_ == 1);
+    drawNode(nodes[2], "旋龟", battleColor, mapNodeIndex_ == 2);
+    drawCenteredText("点击蓝色节点继续路线", screenWidth / 2, 620, 24, mutedText);
+}
+
+void GameApp::drawRestScreen(Font uiFont) const {
+    const Color primaryText{226, 232, 240, 255};
+    const Color restColor{43, 83, 108, 255};
+
+    const auto drawText = [uiFont](const char* text, int x, int y, int fontSize, Color color) {
+        DrawTextEx(uiFont, text, Vector2{static_cast<float>(x), static_cast<float>(y)},
+                   static_cast<float>(fontSize), 1.0F, color);
+    };
+    const auto drawCenteredText = [&drawText, uiFont](const char* text, int centerX, int y,
+                                                       int fontSize, Color color) {
+        const float textWidth = MeasureTextEx(uiFont, text, static_cast<float>(fontSize), 1.0F).x;
+        drawText(text, centerX - static_cast<int>(textWidth / 2.0F), y, fontSize, color);
+    };
+
+    const int centerX = GetScreenWidth() / 2;
+    drawCenteredText("休息点", centerX, 250, 52, primaryText);
+    drawCenteredText("恢复 20 点生命", centerX, 345, 30, primaryText);
+    const Rectangle button = getRestButtonBounds();
+    DrawRectangleRounded(button, 0.12F, 8, restColor);
+    drawCenteredText("点击继续路线", centerX, 460, 28, RAYWHITE);
 }
 
 void GameApp::drawResultScreen(Font uiFont) const {
@@ -288,8 +427,10 @@ void GameApp::drawResultScreen(Font uiFont) const {
     };
 
     const int centerX = GetScreenWidth() / 2;
-    drawCenteredText(victory ? "战斗胜利" : "战斗失败", centerX, 280, 56, resultColor);
-    drawCenteredText("点击返回菜单", centerX, 390, 28, primaryText);
+    drawCenteredText(victory ? "冒险完成" : "战斗失败", centerX, 280, 56, resultColor);
+    const Rectangle button = getResultButtonBounds();
+    DrawRectangleRounded(button, 0.12F, 8, Color{71, 85, 105, 255});
+    drawCenteredText("返回菜单", centerX, 450, 28, primaryText);
 }
 
 void GameApp::drawBattleState(Font uiFont) const {

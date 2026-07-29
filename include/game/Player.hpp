@@ -8,6 +8,7 @@ public:
 
     void startTurn();
     void takeDamage(int damage);
+    void heal(int amount);
     void gainBlock(int amount);
     bool spendEnergy(int amount);
 

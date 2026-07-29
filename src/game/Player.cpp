@@ -21,6 +21,10 @@ void Player::takeDamage(int damage) {
     health_ = std::max(0, health_ - (actualDamage - blockedDamage));
 }
 
+void Player::heal(int amount) {
+    health_ = std::min(maxHealth_, health_ + std::max(0, amount));
+}
+
 void Player::gainBlock(int amount) {
     block_ += std::max(0, amount);
 }
