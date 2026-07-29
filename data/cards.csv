@@ -1,0 +1,5 @@
+# id,name,type,cost,value,copies
+strike,打击,attack,1,6,4
+heavy_strike,重击,attack,2,12,2
+defend,防御,block,1,5,3
+barrier,壁垒,block,2,11,1

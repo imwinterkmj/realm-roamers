@@ -14,6 +14,7 @@ add_executable(card_roguelike
     src/game/GameSession.cpp
     src/game/Player.cpp
     src/game/Enemy.cpp
+    src/game/GameData.cpp
 )
 
 target_include_directories(card_roguelike PRIVATE include)
@@ -30,6 +31,12 @@ endif()
 
 find_package(raylib CONFIG REQUIRED)
 target_link_libraries(card_roguelike PRIVATE raylib)
+
+# 让从 build/ 目录启动的可执行文件也能读取同目录的游戏数据。
+add_custom_command(TARGET card_roguelike POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+            "${CMAKE_SOURCE_DIR}/data" "$<TARGET_FILE_DIR:card_roguelike>/data"
+)
 
 if(MSVC)
     target_compile_options(card_roguelike PRIVATE /W4 /permissive-)

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <raylib.h>
+#include "game/GameData.hpp"
 
 #include <memory>
 #include <string>
@@ -59,6 +60,7 @@ private:
     std::unique_ptr<Player> player_;
     std::unique_ptr<Enemy> enemy_;
     std::unique_ptr<Battle> battle_;
+    GameData gameData_;
     std::vector<Card> deck_;
     int mapNodeIndex_ = 0;
     int turnNumber_ = 1;

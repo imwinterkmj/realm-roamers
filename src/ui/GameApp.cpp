@@ -12,7 +12,8 @@
 #include <utility>
 #include <vector>
 
-GameApp::GameApp() = default;
+GameApp::GameApp()
+    : gameData_(GameData::load()) {}
 GameApp::~GameApp() = default;
 
 void GameApp::run() {
@@ -168,11 +169,13 @@ void GameApp::handleMapInput() {
 
     // 路线固定为：狌狌战斗 → 休息点 → 旋龟战斗。
     if (mapNodeIndex_ == 0) {
-        startBattle("狌狌", 26, 8);
+        const EnemyDefinition& enemy = gameData_.getEnemy("shanshan");
+        startBattle(enemy.name, enemy.maxHealth, enemy.attackPower);
     } else if (mapNodeIndex_ == 1) {
         gameState_ = GameState::Rest;
     } else {
-        startBattle("旋龟", 48, 4);
+        const EnemyDefinition& enemy = gameData_.getEnemy("xuangui");
+        startBattle(enemy.name, enemy.maxHealth, enemy.attackPower);
     }
 }
 
@@ -199,10 +202,11 @@ void GameApp::handleResultInput() {
 
 void GameApp::startNewRun() {
     deck_.clear();
-    for (int index = 0; index < 4; ++index) deck_.emplace_back("打击", CardType::Attack, 1, 6);
-    for (int index = 0; index < 2; ++index) deck_.emplace_back("重击", CardType::Attack, 2, 12);
-    for (int index = 0; index < 3; ++index) deck_.emplace_back("防御", CardType::Block, 1, 5);
-    deck_.emplace_back("壁垒", CardType::Block, 2, 11);
+    for (const CardDefinition& definition : gameData_.getStarterDeck()) {
+        for (int copy = 0; copy < definition.copies; ++copy) {
+            deck_.emplace_back(definition.name, definition.type, definition.energyCost, definition.value);
+        }
+    }
 
     player_ = std::make_unique<Player>("勇者", 80);
     enemy_.reset();
