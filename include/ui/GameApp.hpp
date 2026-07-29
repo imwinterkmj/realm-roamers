@@ -2,6 +2,7 @@
 
 #include <raylib.h>
 
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -12,25 +13,40 @@ class Player;
 // Owns the graphical application loop and translates mouse input into battle actions.
 class GameApp {
 public:
-    GameApp(Player& player, Enemy& enemy, Battle& battle);
+    GameApp();
+    ~GameApp();
 
     void run();
 
 private:
+    enum class GameState {
+        MainMenu,
+        Battle,
+        Victory,
+        Defeat
+    };
+
     // 将当前帧的鼠标点击转换为出牌、结束回合或界面反馈。
     void handleInput();
+    void handleMainMenuInput();
+    void handleResultInput();
     // 只读渲染当前 Battle 状态。
     void drawBattleState(Font uiFont) const;
+    void drawMainMenu(Font uiFont) const;
+    void drawResultScreen(Font uiFont) const;
     // 返回与手牌顺序完全一致的矩形；index i 对应 battle_.getHand()[i]。
     std::vector<Rectangle> getHandCardBounds() const;
     // 返回结束回合按钮的可点击区域，与实际绘制位置共用。
     Rectangle getEndTurnButtonBounds() const;
+    std::vector<Rectangle> getEnemyChoiceBounds() const;
     // 保存一条临时反馈文字并重置其显示倒计时。
     void setFeedback(std::string message, Color color);
+    void startBattle(std::string enemyName, int enemyHealth, int enemyAttack);
 
-    Player& player_;
-    Enemy& enemy_;
-    Battle& battle_;
+    GameState gameState_ = GameState::MainMenu;
+    std::unique_ptr<Player> player_;
+    std::unique_ptr<Enemy> enemy_;
+    std::unique_ptr<Battle> battle_;
     int turnNumber_ = 1;
     std::string feedback_;
     Color feedbackColor_ = RAYWHITE;

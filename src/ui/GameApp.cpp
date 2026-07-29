@@ -7,11 +7,13 @@
 #include "game/Player.hpp"
 
 #include <algorithm>
+#include <memory>
 #include <string>
+#include <utility>
+#include <vector>
 
-GameApp::GameApp(Player& player, Enemy& enemy, Battle& battle)
-    // GameApp 不拥有这些对象；它只读取 Battle 当前状态并负责绘制。
-    : player_(player), enemy_(enemy), battle_(battle) {}
+GameApp::GameApp() = default;
+GameApp::~GameApp() = default;
 
 void GameApp::run() {
     // Day 3 的固定设计画布。后续若支持窗口缩放，drawBattleState() 已会读取实际宽度布局。
@@ -23,8 +25,9 @@ void GameApp::run() {
     // LoadFontEx 只会生成这里列出的字形；新增界面中文时，必须把新字符也加到此字符串中，
     // 否则 Raylib 会用错误的占位字形显示它。
     constexpr const char* uiCharacters =
-        "域上行者第回合玩家敌人生 命格挡能量意图攻击卡堆抽牌弃牌手牌训练木桩勇者打击防御费用伤害造成点获得"
-        "结束提示点击以使用交互将在下一阶段开放不足请选择或无法已出敌人行动战斗胜利失败，0123456789";
+        "域上行者第回合玩家敌人生 命格挡能量意图攻击卡堆抽牌弃牌手牌训练木桩勇者打击重击防御壁垒费用伤害造成点获得"
+        "结束提示点击以使用交互将在下一阶段开放不足请选择或无法已出敌人行动战斗胜利失败，开始选择狌旋龟高低血攻"
+        "返回菜单再来一场0123456789";
 
     // 必须先创建窗口，再加载字体；字体加载需要图形上下文来生成字形纹理。
     InitWindow(windowWidth, windowHeight, "域上行者");
@@ -42,7 +45,18 @@ void GameApp::run() {
         BeginDrawing();
         // 全局深色背景；具体面板和卡牌会在 drawBattleState() 中叠加绘制。
         ClearBackground(Color{20, 24, 33, 255});
-        drawBattleState(uiFont);
+        switch (gameState_) {
+        case GameState::MainMenu:
+            drawMainMenu(uiFont);
+            break;
+        case GameState::Battle:
+            drawBattleState(uiFont);
+            break;
+        case GameState::Victory:
+        case GameState::Defeat:
+            drawResultScreen(uiFont);
+            break;
+        }
         EndDrawing();
     }
 
@@ -60,10 +74,18 @@ void GameApp::handleInput() {
         return;
     }
 
-    // 战斗结束后不再允许改变 Battle，仅重复显示最终结果。
-    if (battle_.isOver()) {
-        setFeedback(player_.isDead() ? "战斗失败" : "战斗胜利",
-                    player_.isDead() ? Color{248, 113, 113, 255} : Color{74, 222, 128, 255});
+    if (gameState_ == GameState::MainMenu) {
+        handleMainMenuInput();
+        return;
+    }
+    if (gameState_ == GameState::Victory || gameState_ == GameState::Defeat) {
+        handleResultInput();
+        return;
+    }
+
+    // 战斗结束后不再允许改变 Battle，直接切换到专用结果界面。
+    if (battle_->isOver()) {
+        gameState_ = player_->isDead() ? GameState::Defeat : GameState::Victory;
         return;
     }
 
@@ -72,15 +94,14 @@ void GameApp::handleInput() {
 
     // 结束回合：Battle 会弃掉手牌、结算敌人攻击；若双方存活则立即开启下一玩家回合。
     if (CheckCollisionPointRec(mousePosition, getEndTurnButtonBounds())) {
-        battle_.endPlayerTurn();
-        if (battle_.isOver()) {
-            setFeedback(player_.isDead() ? "战斗失败" : "战斗胜利",
-                        player_.isDead() ? Color{248, 113, 113, 255} : Color{74, 222, 128, 255});
+        battle_->endPlayerTurn();
+        if (battle_->isOver()) {
+            gameState_ = player_->isDead() ? GameState::Defeat : GameState::Victory;
             return;
         }
 
         ++turnNumber_;
-        battle_.startPlayerTurn();
+        battle_->startPlayerTurn();
         setFeedback("敌人行动结束", Color{148, 163, 184, 255});
         return;
     }
@@ -88,7 +109,7 @@ void GameApp::handleInput() {
     // cardBounds 的第 i 个矩形和 hand 的第 i 张卡严格对应。
     // 这样命中测试得到的 index 可以直接传给 Battle::playCard(index)。
     const std::vector<Rectangle> cardBounds = getHandCardBounds();
-    const std::vector<Card>& hand = battle_.getHand();
+    const std::vector<Card>& hand = battle_->getHand();
     for (std::size_t index = 0; index < cardBounds.size(); ++index) {
         if (!CheckCollisionPointRec(mousePosition, cardBounds[index])) {
             continue;
@@ -96,13 +117,13 @@ void GameApp::handleInput() {
 
         // playCard() 成功后会从手牌 vector 删除该元素，因此先复制名称用于后续反馈。
         const Card selectedCard = hand[index];
-        if (!battle_.playCard(index)) {
+        if (!battle_->playCard(index)) {
             setFeedback("能量不足，无法使用", Color{250, 204, 21, 255});
             return;
         }
 
-        if (battle_.isOver()) {
-            setFeedback("战斗胜利", Color{74, 222, 128, 255});
+        if (battle_->isOver()) {
+            gameState_ = GameState::Victory;
             return;
         }
 
@@ -112,6 +133,41 @@ void GameApp::handleInput() {
 
     // 点击没有命中任何可交互区域时，给出提示而不改变战斗状态。
     setFeedback("请选择手牌或结束回合", Color{148, 163, 184, 255});
+}
+
+void GameApp::handleMainMenuInput() {
+    const Vector2 mousePosition = GetMousePosition();
+    const std::vector<Rectangle> enemyChoices = getEnemyChoiceBounds();
+
+    // 两张选项卡分别启动不同数值定位的基础敌人，后续地图节点会复用 startBattle()。
+    if (CheckCollisionPointRec(mousePosition, enemyChoices[0])) {
+        startBattle("狌狌", 26, 8);
+    } else if (CheckCollisionPointRec(mousePosition, enemyChoices[1])) {
+        startBattle("旋龟", 48, 4);
+    }
+}
+
+void GameApp::handleResultInput() {
+    // MVP 阶段的结果界面只有一个入口：点击后返回菜单并选择下一场战斗。
+    gameState_ = GameState::MainMenu;
+}
+
+void GameApp::startBattle(std::string enemyName, int enemyHealth, int enemyAttack) {
+    std::vector<Card> starterDeck;
+    for (int index = 0; index < 4; ++index) starterDeck.emplace_back("打击", CardType::Attack, 1, 6);
+    for (int index = 0; index < 2; ++index) starterDeck.emplace_back("重击", CardType::Attack, 2, 12);
+    for (int index = 0; index < 3; ++index) starterDeck.emplace_back("防御", CardType::Block, 1, 5);
+    starterDeck.emplace_back("壁垒", CardType::Block, 2, 11);
+
+    player_ = std::make_unique<Player>("勇者", 80);
+    enemy_ = std::make_unique<Enemy>(std::move(enemyName), enemyHealth, enemyAttack);
+    battle_ = std::make_unique<Battle>(*player_, *enemy_, std::move(starterDeck), 42);
+    battle_->startPlayerTurn();
+
+    turnNumber_ = 1;
+    feedback_.clear();
+    feedbackTimer_ = 0.0F;
+    gameState_ = GameState::Battle;
 }
 
 std::vector<Rectangle> GameApp::getHandCardBounds() const {
@@ -125,7 +181,7 @@ std::vector<Rectangle> GameApp::getHandCardBounds() const {
 
     const int screenWidth = GetScreenWidth();
     const int contentWidth = screenWidth - margin * 2;
-    const int cardCount = static_cast<int>(battle_.getHand().size());
+    const int cardCount = static_cast<int>(battle_->getHand().size());
     // 牌数较少时使用理想宽度；牌数较多时缩小到一行仍能显示完整手牌。
     const int cardWidth = cardCount > 0
         ? std::min(maximumCardWidth, (contentWidth - cardGap * (cardCount - 1)) / cardCount)
@@ -154,11 +210,86 @@ Rectangle GameApp::getEndTurnButtonBounds() const {
                      static_cast<float>(endTurnButtonWidth), static_cast<float>(pileHeight)};
 }
 
+std::vector<Rectangle> GameApp::getEnemyChoiceBounds() const {
+    constexpr int cardWidth = 400;
+    constexpr int cardHeight = 280;
+    constexpr int gap = 64;
+    const int totalWidth = cardWidth * 2 + gap;
+    const int firstX = (GetScreenWidth() - totalWidth) / 2;
+    constexpr int cardY = 315;
+
+    return {
+        Rectangle{static_cast<float>(firstX), static_cast<float>(cardY),
+                  static_cast<float>(cardWidth), static_cast<float>(cardHeight)},
+        Rectangle{static_cast<float>(firstX + cardWidth + gap), static_cast<float>(cardY),
+                  static_cast<float>(cardWidth), static_cast<float>(cardHeight)}
+    };
+}
+
 void GameApp::setFeedback(std::string message, Color color) {
     // std::move 将传入字符串所有权转给成员变量，避免不必要的复制。
     feedback_ = std::move(message);
     feedbackColor_ = color;
     feedbackTimer_ = 2.0F;
+}
+
+void GameApp::drawMainMenu(Font uiFont) const {
+    const Color primaryText{226, 232, 240, 255};
+    const Color mutedText{148, 163, 184, 255};
+    const Color borderColor{71, 85, 105, 255};
+    const Color fastEnemyColor{117, 52, 68, 255};
+    const Color toughEnemyColor{43, 83, 108, 255};
+
+    const auto drawText = [uiFont](const char* text, int x, int y, int fontSize, Color color) {
+        DrawTextEx(uiFont, text, Vector2{static_cast<float>(x), static_cast<float>(y)},
+                   static_cast<float>(fontSize), 1.0F, color);
+    };
+    const auto drawCenteredText = [&drawText, uiFont](const char* text, int centerX, int y,
+                                                       int fontSize, Color color) {
+        const float textWidth = MeasureTextEx(uiFont, text, static_cast<float>(fontSize), 1.0F).x;
+        drawText(text, centerX - static_cast<int>(textWidth / 2.0F), y, fontSize, color);
+    };
+
+    const int screenWidth = GetScreenWidth();
+    drawCenteredText("域上行者", screenWidth / 2, 100, 58, primaryText);
+    drawCenteredText("选择敌人开始战斗", screenWidth / 2, 190, 30, mutedText);
+
+    const std::vector<Rectangle> enemyChoices = getEnemyChoiceBounds();
+    const auto drawEnemyChoice = [&drawCenteredText, borderColor](Rectangle bounds, Color background,
+                                                                    const char* name, const char* role,
+                                                                    int health, int attack) {
+        DrawRectangleRounded(bounds, 0.08F, 8, background);
+        DrawRectangleRoundedLinesEx(bounds, 0.08F, 8, 3.0F, borderColor);
+        const int centerX = static_cast<int>(bounds.x + bounds.width / 2.0F);
+        drawCenteredText(name, centerX, static_cast<int>(bounds.y) + 42, 44, RAYWHITE);
+        drawCenteredText(role, centerX, static_cast<int>(bounds.y) + 104, 26, RAYWHITE);
+        drawCenteredText(TextFormat("生命 %i", health), centerX, static_cast<int>(bounds.y) + 162, 28, RAYWHITE);
+        drawCenteredText(TextFormat("攻击 %i", attack), centerX, static_cast<int>(bounds.y) + 206, 28, RAYWHITE);
+    };
+
+    drawEnemyChoice(enemyChoices[0], fastEnemyColor, "狌狌", "高攻低血", 26, 8);
+    drawEnemyChoice(enemyChoices[1], toughEnemyColor, "旋龟", "高血低攻", 48, 4);
+    drawCenteredText("点击敌人开始战斗", screenWidth / 2, 660, 24, mutedText);
+}
+
+void GameApp::drawResultScreen(Font uiFont) const {
+    const bool victory = gameState_ == GameState::Victory;
+    const Color resultColor = victory ? Color{74, 222, 128, 255} : Color{248, 113, 113, 255};
+    const Color primaryText{226, 232, 240, 255};
+
+    const auto drawText = [uiFont](const char* text, int x, int y, int fontSize, Color color) {
+        DrawTextEx(uiFont, text, Vector2{static_cast<float>(x), static_cast<float>(y)},
+                   static_cast<float>(fontSize), 1.0F, color);
+    };
+    const auto drawCenteredText = [&drawText, uiFont](const char* text, int centerX, int y,
+                                                       int fontSize, Color color) {
+        const float textWidth = MeasureTextEx(uiFont, text, static_cast<float>(fontSize), 1.0F).x;
+        drawText(text, centerX - static_cast<int>(textWidth / 2.0F), y, fontSize, color);
+    };
+
+    const int centerX = GetScreenWidth() / 2;
+    drawCenteredText(victory ? "战斗胜利" : "战斗失败", centerX, 280, 56, resultColor);
+    drawCenteredText("点击返回菜单", centerX, 390, 28, primaryText);
 }
 
 void GameApp::drawBattleState(Font uiFont) const {
@@ -209,10 +340,10 @@ void GameApp::drawBattleState(Font uiFont) const {
                                    static_cast<float>(statusPanelWidth), 260.0F},
                          2.0F, borderColor);
     drawText("玩家", 88, 178, 28, playerColor);
-    drawText(player_.getName().c_str(), 88, 225, 42, primaryText);
-    drawText(TextFormat("生命  %i", player_.getHealth()), 88, 300, 32, healthColor);
-    drawText(TextFormat("格挡  %i", player_.getBlock()), 88, 350, 32, primaryText);
-    drawText(TextFormat("能量  %i", player_.getEnergy()), 330, 350, 32, energyColor);
+    drawText(player_->getName().c_str(), 88, 225, 42, primaryText);
+    drawText(TextFormat("生命  %i", player_->getHealth()), 88, 300, 32, healthColor);
+    drawText(TextFormat("格挡  %i", player_->getBlock()), 88, 350, 32, primaryText);
+    drawText(TextFormat("能量  %i", player_->getEnergy()), 330, 350, 32, energyColor);
 
     // -------- 右上：敌人状态面板 --------
     // enemyPanelX 由左面板宽度和间距计算，窗口变宽时两块面板会一起扩展。
@@ -222,9 +353,9 @@ void GameApp::drawBattleState(Font uiFont) const {
                                    static_cast<float>(statusPanelWidth), 260.0F},
                          2.0F, borderColor);
     drawText("敌人", enemyPanelX + 32, 178, 28, enemyColor);
-    drawText(enemy_.getName().c_str(), enemyPanelX + 32, 225, 42, primaryText);
-    drawText(TextFormat("生命  %i", enemy_.getHealth()), enemyPanelX + 32, 300, 32, healthColor);
-    drawText(TextFormat("意图  攻击 %i", enemy_.getAttackDamage()), enemyPanelX + 32, 350, 32, enemyColor);
+    drawText(enemy_->getName().c_str(), enemyPanelX + 32, 225, 42, primaryText);
+    drawText(TextFormat("生命  %i", enemy_->getHealth()), enemyPanelX + 32, 300, 32, healthColor);
+    drawText(TextFormat("意图  攻击 %i", enemy_->getAttackDamage()), enemyPanelX + 32, 350, 32, enemyColor);
 
     // -------- 中部：手牌区域标题 --------
     drawText("手牌", margin, 445, 24, mutedText);
@@ -248,12 +379,12 @@ void GameApp::drawBattleState(Font uiFont) const {
         drawText(TextFormat("%i", count), x + pileWidth - 52, pileY + 18, 34, primaryText);
     };
 
-    drawPile("抽牌堆", static_cast<int>(battle_.getDrawPileSize()), margin);
-    drawPile("弃牌堆", static_cast<int>(battle_.getDiscardPileSize()), screenWidth - margin - pileWidth);
+    drawPile("抽牌堆", static_cast<int>(battle_->getDrawPileSize()), margin);
+    drawPile("弃牌堆", static_cast<int>(battle_->getDiscardPileSize()), screenWidth - margin - pileWidth);
 
     // 点击区域与 handleInput() 共用 getEndTurnButtonBounds()，防止按钮外观和判定位置不同步。
     const Rectangle endTurnButtonBounds = getEndTurnButtonBounds();
-    const bool battleOver = battle_.isOver();
+    const bool battleOver = battle_->isOver();
     DrawRectangleRounded(endTurnButtonBounds, 0.12F, 8, battleOver ? unavailableColor : buttonColor);
     drawCenteredText(battleOver ? "战斗结束" : "结束回合",
                      static_cast<int>(endTurnButtonBounds.x + endTurnButtonBounds.width / 2.0F),
@@ -261,7 +392,7 @@ void GameApp::drawBattleState(Font uiFont) const {
 
     // -------- 中下部：手牌卡片 --------
     // getHand() 返回只读引用，UI 仅展示卡牌，不在这里移除或打出卡牌。
-    const std::vector<Card>& hand = battle_.getHand();
+    const std::vector<Card>& hand = battle_->getHand();
     // getHandCardBounds() 同时供绘制和点击检测使用，保证两者始终对齐。
     const std::vector<Rectangle> cardBounds = getHandCardBounds();
 
@@ -273,7 +404,7 @@ void GameApp::drawBattleState(Font uiFont) const {
         const int cardWidth = static_cast<int>(cardRect.width);
         // 费用：每张牌右上角的数字表示使用它要消耗多少能量。
         // Day 4 点击卡牌时，Battle::playCard() 会再次做同样的合法性检查。
-        const bool canAfford = player_.getEnergy() >= card.getEnergyCost();
+        const bool canAfford = player_->getEnergy() >= card.getEnergyCost();
         // 类型决定卡片颜色和效果文本：攻击牌造成伤害，防御牌获得格挡。
         const bool isAttack = card.getType() == CardType::Attack;
         const Color cardColor = canAfford ? (isAttack ? attackColor : blockColor) : unavailableColor;
